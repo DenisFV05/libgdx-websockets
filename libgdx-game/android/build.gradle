@@ -67,6 +67,7 @@ dependencies {
   natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-x86"
   natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-x86_64"
   implementation "com.github.MrStahlfelge.gdx-websockets:core:$wsVersion"
+  implementation "com.github.MrStahlfelge.gdx-websockets:common:$wsVersion"
 
 }
 

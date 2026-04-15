@@ -9,7 +9,12 @@ import com.badlogic.gdx.graphics.g2d.Animation;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.math.Rectangle;
+import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.graphics.OrthographicCamera;
 
 import com.github.czyzby.websocket.WebSocket;
 import com.github.czyzby.websocket.WebSockets;
@@ -22,7 +27,11 @@ public class MainWebsockets extends ApplicationAdapter {
     // SPRITESHEET
     private Texture sheet;
     private TextureRegion[][] frames;
-    private Animation<TextureRegion> animation;
+    private Animation<TextureRegion> animDown, animUp, animLeft, animRight;
+    private Animation<TextureRegion> currentAnimation;
+
+    // CAMERA
+    private OrthographicCamera camera;
 
     // BACKGROUND
     private Texture background;
@@ -35,8 +44,16 @@ public class MainWebsockets extends ApplicationAdapter {
     // ANIMATION
     private float stateTime = 0f;
 
-    // JOYSTICK ZONES
-    private Rectangle left, right, up, down;
+    // DRAWING
+    private ShapeRenderer shapeRenderer;
+
+    // JOYSTICK (PREMIUM)
+    private Vector2 joystickCenter = new Vector2(150, 150);
+    private Vector2 joystickKnob = new Vector2(150, 150);
+    private float joystickOuterRadius = 80f;
+    private float joystickInnerRadius = 40f;
+    private boolean joystickActive = false;
+    private Vector2 moveVector = new Vector2(0, 0);
 
     // WEBSOCKET
     private WebSocket socket;
@@ -47,33 +64,45 @@ public class MainWebsockets extends ApplicationAdapter {
     public void create() {
 
         batch = new SpriteBatch();
+        shapeRenderer = new ShapeRenderer();
+        camera = new OrthographicCamera();
+        camera.setToOrtho(false, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
 
-        // LOAD SPRITESHEET (5 columns, 4 rows)
-        sheet = new Texture("mudkip.png");
+        // LOAD SPRITESHEET
+        sheet = new Texture("dawn.png");
+
+        // Evitar bordes borrosos y mezcla ("bleeding") entre frames vecinos si la
+        // imagen es pixel art
+        sheet.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+
+        // ATENCIÓN: Te he cambiado las columnas de 5 a 4. Si ves dos trozos es 100% que
+        // tu imagen
+        // no tiene 5 columnas exactas, lo estándar de estos sprites es 4 (o 3).
+        int COLS = 4;
+        int ROWS = 4;
 
         frames = TextureRegion.split(
                 sheet,
-                sheet.getWidth() / 5,
-                sheet.getHeight() / 4
-        );
+                sheet.getWidth() / COLS,
+                sheet.getHeight() / ROWS);
 
-        // Fila 2 (derecha) → animación principal
-        TextureRegion[] walk = new TextureRegion[4];
+        // Configuramos las animaciones (Orden estándar RPG: Abajo, Izquierda, Derecha,
+        // Arriba)
+        animDown = new Animation<>(0.15f, frames[0]);
+        animLeft = new Animation<>(0.15f, frames[1]);
+        animRight = new Animation<>(0.15f, frames[2]);
+        animUp = new Animation<>(0.15f, frames[3]);
 
-        for (int i = 0; i < 4; i++) {
-            walk[i] = frames[2][i];
-        }
+        currentAnimation = animDown;
 
-        animation = new Animation<>(0.1f, walk);
-
-        // BACKGROUND
+        // BACKGROUND - Tiled
         background = new Texture("background.png");
+        background.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
 
-        // JOYSTICK ZONES
-        left = new Rectangle(0, 0, Gdx.graphics.getWidth() / 3f, Gdx.graphics.getHeight());
-        right = new Rectangle(Gdx.graphics.getWidth() * 2f / 3f, 0, Gdx.graphics.getWidth() / 3f, Gdx.graphics.getHeight());
-        up = new Rectangle(0, Gdx.graphics.getHeight() * 2f / 3f, Gdx.graphics.getWidth(), Gdx.graphics.getHeight() / 3f);
-        down = new Rectangle(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight() / 3f);
+        // Inicializar posición del joystick según tamaño de pantalla
+        float padding = 150f;
+        joystickCenter.set(padding, padding);
+        joystickKnob.set(padding, padding);
 
         // WEBSOCKET - Determinamos la dirección según la plataforma
         String address;
@@ -132,69 +161,127 @@ public class MainWebsockets extends ApplicationAdapter {
 
         float delta = Gdx.graphics.getDeltaTime();
 
+        // Actualizar cámara
+        camera.update();
+        batch.setProjectionMatrix(camera.combined);
+        shapeRenderer.setProjectionMatrix(camera.combined);
+
         Gdx.gl.glClearColor(0.15f, 0.15f, 0.2f, 1f);
-        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
-
-        stateTime += delta;
-
-        TextureRegion currentFrame = animation.getKeyFrame(stateTime, true);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
 
         handleInput(delta);
 
+        // SOLO actualizar la animación si se está moviendo
+        if (joystickActive) {
+            stateTime += delta;
+        } else {
+            stateTime = 0f; // Volver al frame de pie si se suelta el joystick
+        }
+        TextureRegion currentFrame = currentAnimation.getKeyFrame(stateTime, true);
+
         // SEND POSITION (1 sec)
         timer += delta;
-
         if (timer > 1f) {
             timer = 0f;
-
             if (socket != null && socketConnected) {
-                String message = "x:" + (int) posX + ",y:" + (int) posY;
+                // Formato JSON para un toque más profesional
+                String message = String.format("{\"x\": %d, \"y\": %d}", (int) posX, (int) posY);
                 socket.send(message);
                 Gdx.app.log("WebSocket", "Enviando: " + message);
             }
         }
 
+        // 1. PINTAR FONDO REPETIDO
         batch.begin();
+        // Usamos el tamaño de pantalla literal en srcW y srcH para que se repita
+        // perfectamente
+        // al tamaño original de la imagen, sin estirarse.
+        batch.draw(background, 0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight(),
+                0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight(), false, false);
 
-        // BACKGROUND FIRST
-        batch.draw(background, 0, 0,
-                Gdx.graphics.getWidth(),
-                Gdx.graphics.getHeight());
-
-        // PLAYER
-        batch.draw(currentFrame, posX, posY);
-
+        // 2. PINTAR JUGADOR
+        batch.draw(currentFrame, posX, posY, currentFrame.getRegionWidth() * 1.5f,
+                currentFrame.getRegionHeight() * 1.5f);
         batch.end();
+
+        // 3. PINTAR JOYSTICK (SHAPE RENDERER)
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+
+        // Base del joystick (semi-transparente)
+        shapeRenderer.setColor(0.5f, 0.5f, 0.5f, 0.4f);
+        shapeRenderer.circle(joystickCenter.x, joystickCenter.y, joystickOuterRadius);
+
+        // Pomo del joystick
+        if (joystickActive) {
+            shapeRenderer.setColor(Color.CYAN);
+        } else {
+            shapeRenderer.setColor(Color.LIGHT_GRAY);
+        }
+        shapeRenderer.circle(joystickKnob.x, joystickKnob.y, joystickInnerRadius);
+
+        shapeRenderer.end();
+        Gdx.gl.glDisable(GL20.GL_BLEND);
     }
 
     private void handleInput(float delta) {
-        if (!Gdx.input.isTouched()) return;
+        if (!Gdx.input.isTouched()) {
+            joystickActive = false;
+            joystickKnob.set(joystickCenter);
+            moveVector.set(0, 0);
+            return;
+        }
 
-        Vector3 touch = new Vector3();
-        touch.set(
-            Gdx.input.getX(),
-            Gdx.graphics.getHeight() - Gdx.input.getY(),  // ← CORRECCIÓ CLAU
-            0
-        );
+        Vector3 touch = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+        // No necesitamos corregir Y manualmente si usamos el joystick lógico bien
+        // Pero para ser consistentes con LibGDX Screen Coords vs World Coords:
+        float touchX = touch.x;
+        float touchY = Gdx.graphics.getHeight() - touch.y;
 
-        if (left.contains(touch.x, touch.y)) posX -= speed * delta;
-        if (right.contains(touch.x, touch.y)) posX += speed * delta;
-        if (up.contains(touch.x, touch.y)) posY += speed * delta;
-        if (down.contains(touch.x, touch.y)) posY -= speed * delta;
+        float dist = joystickCenter.dst(touchX, touchY);
+
+        if (dist < joystickOuterRadius || joystickActive) {
+            joystickActive = true;
+
+            if (dist > joystickOuterRadius) {
+                // Limitar el pomo al radio exterior
+                float angle = MathUtils.atan2(touchY - joystickCenter.y, touchX - joystickCenter.x);
+                joystickKnob.x = joystickCenter.x + MathUtils.cos(angle) * joystickOuterRadius;
+                joystickKnob.y = joystickCenter.y + MathUtils.sin(angle) * joystickOuterRadius;
+            } else {
+                joystickKnob.set(touchX, touchY);
+            }
+
+            // Calcular vector de movimiento normalizado
+            moveVector.set(joystickKnob).sub(joystickCenter).scl(1f / joystickOuterRadius);
+
+            // Mover personaje
+            posX += moveVector.x * speed * delta;
+            posY += moveVector.y * speed * delta;
+
+            // Cambiar animación según dirección predominante SIN crear nuevos objetos
+            if (Math.abs(moveVector.x) > Math.abs(moveVector.y)) {
+                currentAnimation = moveVector.x > 0 ? animRight : animLeft;
+            } else {
+                currentAnimation = moveVector.y > 0 ? animUp : animDown;
+            }
+        }
     }
 
     @Override
     public void resize(int width, int height) {
-        // Actualizar zonas del joystick cuando cambia el tamaño de la ventana
-        left = new Rectangle(0, 0, width / 3f, height);
-        right = new Rectangle(width * 2f / 3f, 0, width / 3f, height);
-        up = new Rectangle(0, height * 2f / 3f, width, height / 3f);
-        down = new Rectangle(0, 0, width, height / 3f);
+        if (camera != null) {
+            camera.setToOrtho(false, width, height);
+        }
+        // Reposicionar joystick si cambia el tamaño
+        joystickCenter.set(150, 150);
+        joystickKnob.set(150, 150);
     }
 
     @Override
     public void dispose() {
         batch.dispose();
+        shapeRenderer.dispose();
         sheet.dispose();
         background.dispose();
 

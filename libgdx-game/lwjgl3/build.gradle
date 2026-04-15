@@ -34,6 +34,7 @@ dependencies {
   
   // AFEGIR AQUESTA LÍNIA PER AL WEBSOCKET
   implementation "com.github.MrStahlfelge.gdx-websockets:core:$wsVersion"
+  implementation "com.github.MrStahlfelge.gdx-websockets:common:$wsVersion"
 
   if(enableGraalNative == 'true') {
     implementation "io.github.berstanio:gdx-svmhelper-backend-lwjgl3:$graalHelperVersion"
