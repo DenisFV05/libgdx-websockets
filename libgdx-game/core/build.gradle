@@ -3,7 +3,9 @@ eclipse.project.name = appName + '-core'
 
 dependencies {
   api "com.badlogicgames.gdx:gdx:$gdxVersion"
-  implementation "com.github.czyzby:gdx-websocket:1.9.10.3"
+  
+  implementation "com.github.MrStahlfelge.gdx-websockets:core:$wsVersion"
+  implementation "com.github.MrStahlfelge.gdx-websockets:common:$wsVersion"
 
   if(enableGraalNative == 'true') {
     implementation "io.github.berstanio:gdx-svmhelper-annotations:$graalHelperVersion"
