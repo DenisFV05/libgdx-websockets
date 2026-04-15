@@ -7,7 +7,7 @@ console.log("Servidor WebSocket activo en puerto 8888");
 
 // Cuando un cliente se conecta
 server.on("connection", (ws) => {
-    console.log("🔌 Cliente conectado");
+    console.log("Cliente conectado");
 
     // Cuando recibe mensaje
     ws.on("message", (message) => {
