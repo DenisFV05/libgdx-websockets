@@ -11,11 +11,11 @@ server.on("connection", (ws) => {
 
     // Cuando recibe mensaje
     ws.on("message", (message) => {
-        console.log("📩 Posición recibida:", message.toString());
+        console.log("Posición recibida:", message.toString());
     });
 
     // Cuando se desconecta
     ws.on("close", () => {
-        console.log("❌ Cliente desconectado");
+        console.log("Cliente desconectado");
     });
 });
